@@ -182,6 +182,7 @@ footer{margin-top:34px;color:var(--muted);font-size:11.5px;text-align:center;lin
   <nav class="nav-tabs" id="navTabs">
     <button class="nav-tab active" data-t="meta">Meta Ads</button>
     <button class="nav-tab" data-t="google">Google Ads</button>
+    <button class="nav-tab" data-t="combined">Meta + Google</button>
     <button class="nav-tab" data-t="allleads">Pago + Orgânico</button>
     <button class="nav-tab" data-t="insights">Insights</button>
   </nav>
@@ -201,7 +202,7 @@ footer{margin-top:34px;color:var(--muted);font-size:11.5px;text-align:center;lin
 
   <footer>
     <b>Abas Meta Ads / Google Ads</b>: métricas calculadas <b>somente</b> com leads em que utm_source = Facebook-Ads (Meta) ou google-ads (Google).
-    Gasto com imposto ×<span id="taxFoot">1,1385</span> em <b>todas</b> as métricas de custo (CPM, CPC, CPL…).<br>
+    Imposto ×<span id="taxFoot">1,1385</span> aplicado ao gasto <b>apenas do Meta Ads</b> nas métricas de custo (CPM, CPC, CPL…). <b>Google Ads sem imposto.</b><br>
     Reconstruído automaticamente na nuvem a cada 2h (GitHub Actions) — somente leitura das planilhas.
   </footer>
 </div>
@@ -262,8 +263,12 @@ function sumLeads(s,e,src=null){
   }
   return n;
 }
-function metrics(a,leads,hasLpv){
-  const spendT=a.spend*TAX;
+// taxMul multiplies spend before cost metrics. Imposto só vale para Meta Ads;
+// Google Ads entra SEM imposto (taxMul = 1).
+const taxFor = ch => ch==='google' ? 1 : TAX;
+function metrics(a,leads,hasLpv,taxMul){
+  const tm=(taxMul==null?TAX:taxMul);
+  const spendT=a.spend*tm;
   const lpv=a.lpv||0;
   return{
     spend:a.spend,spendT,
@@ -278,6 +283,29 @@ function metrics(a,leads,hasLpv){
     pvToLead:hasLpv&&lpv?leads/lpv*100:null,
     clkToLead:a.clicks?leads/a.clicks*100:null,
     conv:hasLpv?(lpv?leads/lpv*100:null):(a.clicks?leads/a.clicks*100:null),
+  };
+}
+// Métricas combinadas Meta + Google (pago). Meta c/ imposto, Google sem imposto.
+// lpv/page views existem só na Meta; conversão combinada = leads ÷ cliques.
+function combinedMetrics(s,e){
+  const m=sumAds('meta',s,e), g=sumAds('google',s,e);
+  const impressions=m.impressions+g.impressions;
+  const clicks=m.clicks+g.clicks;
+  const lpv=m.lpv+g.lpv;                 // só Meta contribui com page views
+  const leads=sumLeads(s,e,'paid');
+  const metaLeads=sumLeads(s,e,'meta');
+  const metaSpendT=m.spend*TAX, googleSpend=g.spend;
+  const spendT=metaSpendT+googleSpend;   // Meta c/ imposto + Google sem imposto
+  return {
+    spendT, metaSpendT, googleSpend, impressions, clicks, lpv, leads, metaLeads,
+    cpm:impressions?spendT/impressions*1000:null,
+    ctr:impressions?clicks/impressions*100:null,
+    cpc:clicks?spendT/clicks:null,
+    cpl:leads?spendT/leads:null,
+    clkToPv:clicks?lpv/clicks*100:null,
+    pvToLead:lpv?metaLeads/lpv*100:null,
+    clkToLead:clicks?leads/clicks*100:null,
+    conv:clicks?leads/clicks*100:null,
   };
 }
 // Aggregate ads of one channel by level, joining that channel's leads by UTM.
@@ -307,7 +335,7 @@ function aggregateLevel(channel,level,s,e){
     o.leads+=r.count;
   }
   return Object.values(m).map(r=>{
-    const mt=metrics({spend:r.spend,impressions:r.impressions,clicks:r.clicks,lpv:r.lpv},r.leads,cfg.hasLpv);
+    const mt=metrics({spend:r.spend,impressions:r.impressions,clicks:r.clicks,lpv:r.lpv},r.leads,cfg.hasLpv,taxFor(channel));
     return{...mt,name:r.name};
   });
 }
@@ -423,10 +451,12 @@ function card(label,value,deltaHtml,sub,hint){
 function renderPaid(channel){
   const cfg=CH[channel];
   const hasLpv=cfg.hasLpv;
+  const tax=taxFor(channel); // Google entra sem imposto
   const len=diffDays(curStart,curEnd)+1;
   const pEnd=addDays(curStart,-1),pStart=addDays(pEnd,-(len-1));
-  const cur=metrics(sumAds(channel,curStart,curEnd),sumLeads(curStart,curEnd,cfg.source),hasLpv);
-  const prv=metrics(sumAds(channel,pStart,pEnd),sumLeads(pStart,pEnd,cfg.source),hasLpv);
+  const cur=metrics(sumAds(channel,curStart,curEnd),sumLeads(curStart,curEnd,cfg.source),hasLpv,tax);
+  const prv=metrics(sumAds(channel,pStart,pEnd),sumLeads(pStart,pEnd,cfg.source),hasLpv,tax);
+  const investLabel=tax>1?'Investimento (c/ imposto)':'Investimento';
 
   let html=`
   <div class="section-title">Funil do período — ${esc(cfg.label)} · Δ vs período anterior</div>
@@ -434,7 +464,7 @@ function renderPaid(channel){
 
   <div class="section-title">Evolução diária</div>
   <div class="charts">
-    <div class="chartcard"><h3>Investimento (c/ imposto) × Leads</h3><div class="cv"><canvas id="chSpend"></canvas></div></div>
+    <div class="chartcard"><h3>${investLabel} × Leads</h3><div class="cv"><canvas id="chSpend"></canvas></div></div>
     <div class="chartcard"><h3>Funil por dia</h3><div class="cv"><canvas id="chFunnel"></canvas></div></div>
     <div class="chartcard"><h3>Custo por Lead (CPL) por dia</h3><div class="cv"><canvas id="chCpl"></canvas></div></div>
     <div class="chartcard"><h3>CPC × CPL por dia</h3><div class="cv"><canvas id="chCost"></canvas></div></div>
@@ -490,7 +520,7 @@ function renderPaid(channel){
   // Daily series
   const days=[];for(let d=curStart;d<=curEnd;d=addDays(d,1))days.push(d);
   const dm={};days.forEach(d=>dm[d]={spendT:0,impressions:0,clicks:0,lpv:0,leads:0});
-  for(const r of ADS){if(r.channel===channel&&dm[r.date]){dm[r.date].spendT+=r.spend*TAX;dm[r.date].impressions+=r.impressions;dm[r.date].clicks+=r.clicks;dm[r.date].lpv+=r.lpv;}}
+  for(const r of ADS){if(r.channel===channel&&dm[r.date]){dm[r.date].spendT+=r.spend*tax;dm[r.date].impressions+=r.impressions;dm[r.date].clicks+=r.clicks;dm[r.date].lpv+=r.lpv;}}
   for(const r of LEADS){if(r.source===cfg.source&&dm[r.date]){dm[r.date].leads+=r.count;}}
   const lbs=days.map(fmtBR);
   const A=cssVar('--accent'),A2=cssVar('--accent2'),G=cssVar('--good'),W=cssVar('--warn'),BD=cssVar('--bad');
@@ -523,9 +553,10 @@ function renderPaid(channel){
   // Daily detail table
   {
     const pvCols=hasLpv?'<th>Page Views</th><th>Cliq→PV</th><th>PV→Lead</th>':'';
-    let dt='<table><thead><tr><th>Data</th><th>Invest. c/imp</th><th>Leads</th><th>CPL</th><th>Impressões</th><th>Cliques</th><th>CTR</th>'+pvCols+'<th>Conv.</th></tr></thead><tbody>';
+    const invHead=tax>1?'Invest. c/imp':'Invest.';
+    let dt='<table><thead><tr><th>Data</th><th>'+invHead+'</th><th>Leads</th><th>CPL</th><th>Impressões</th><th>Cliques</th><th>CTR</th>'+pvCols+'<th>Conv.</th></tr></thead><tbody>';
     let [tSp,tIm,tCl,tLp,tLd]=[0,0,0,0,0];
-    for(const d of days){
+    for(const d of [...days].reverse()){
       const r=dm[d];
       const ctr=r.impressions?r.clicks/r.impressions*100:null;
       const c2pv=r.clicks?r.lpv/r.clicks*100:null;
@@ -556,7 +587,7 @@ function renderPaid(channel){
 
 function optCols(cfg){
   const cols=[
-    ['name','Nome',null],['spendT','Invest. c/ imp',v=>money(v)],
+    ['name','Nome',null],['spendT',cfg.key==='google'?'Invest.':'Invest. c/ imp',v=>money(v)],
     ['leads','Leads',v=>int(v)],
     ['cpl','CPL',v=>money(v)],
     ['impressions','Impr.',v=>int(v)],
@@ -607,7 +638,7 @@ function renderOptTable(channel){
   const T=allRows.filter(r=>!r.unattr).reduce((t,r)=>{
     t.spend+=r.spend;t.impressions+=r.impressions;t.clicks+=r.clicks;t.lpv+=r.lpv;t.leads+=r.leads;return t;
   },{spend:0,impressions:0,clicks:0,lpv:0,leads:0});
-  const TM={...metrics({spend:T.spend,impressions:T.impressions,clicks:T.clicks,lpv:T.lpv},T.leads,cfg.hasLpv),name:'TOTAL'};
+  const TM={...metrics({spend:T.spend,impressions:T.impressions,clicks:T.clicks,lpv:T.lpv},T.leads,cfg.hasLpv,taxFor(channel)),name:'TOTAL'};
 
   let h='';
   const chips=[];
@@ -674,7 +705,7 @@ function renderAllLeads(){
   const paid=meta+google;
   const all=paid+org;
   const spendMeta=sumAds('meta',curStart,curEnd).spend*TAX;
-  const spendGoogle=sumAds('google',curStart,curEnd).spend*TAX;
+  const spendGoogle=sumAds('google',curStart,curEnd).spend; // Google sem imposto
   const spendPaid=spendMeta+spendGoogle;
   const pctPaid=all?paid/all*100:null;
   const cplPaid=paid?spendPaid/paid:null;
@@ -687,7 +718,7 @@ function renderAllLeads(){
     ${card('Total de Leads',int(all),'','todas as origens')}
     ${card('Leads Pagos',int(paid),'',pctPaid!=null?dec(pctPaid,1)+'% do total':'')}
     ${card('Leads Orgânicos',int(org),'',pctPaid!=null?dec(100-pctPaid,1)+'% do total':'')}
-    ${card('Investimento Total',money(spendPaid),'','Meta + Google · c/ imposto')}
+    ${card('Investimento Total',money(spendPaid),'','Meta c/ imposto + Google sem imposto')}
   </div>
   <div class="grid g4" style="margin-top:12px">
     ${card('Leads Meta Ads',int(meta),'','utm_source = Facebook-Ads')}
@@ -726,7 +757,7 @@ function renderAllLeads(){
   for(const r of ADS){
     if(!dm[r.date]) continue;
     if(r.channel==='meta') dm[r.date].spMeta+=r.spend*TAX;
-    else dm[r.date].spGoogle+=r.spend*TAX;
+    else dm[r.date].spGoogle+=r.spend; // Google sem imposto
   }
   const lbs=days.map(fmtBR);
   const M=cssVar('--meta'),GG=cssVar('--google'),O=cssVar('--org');
@@ -744,7 +775,7 @@ function renderAllLeads(){
 
   let t='<table><thead><tr><th>Data</th><th>Meta</th><th>Google</th><th>Pago</th><th>Orgânico</th><th>Total</th><th>Invest. Total</th><th>CPL Pago</th></tr></thead><tbody>';
   let tM=0,tG=0,tO=0,tSp=0;
-  for(const d of days){
+  for(const d of [...days].reverse()){
     const r=dm[d];const p=r.meta+r.google;const sp=r.spMeta+r.spGoogle;const cpl=p?sp/p:null;
     tM+=r.meta;tG+=r.google;tO+=r.org;tSp+=sp;
     t+=`<tr><td>${fmtBR(d)}</td><td>${int(r.meta)}</td><td>${int(r.google)}</td><td>${int(p)}</td><td>${int(r.org)}</td><td>${int(p+r.org)}</td><td>${money(sp)}</td><td>${money(cpl)}</td></tr>`;
@@ -777,9 +808,11 @@ function renderInsights(){
   const allLeads=paid+org;
   const paidPrv=sumLeads(pStart,pEnd,'paid');
   const attrPct=allLeads?paid/allLeads*100:null;
+  const mA=sumAds('meta',curStart,curEnd); // Meta puro (para etapas "só Meta")
 
-  const cur=metrics(aCur,paid,true);
-  const prv=metrics(aPrv,paidPrv,true);
+  // Combinado: Meta c/ imposto + Google sem imposto
+  const cur=combinedMetrics(curStart,curEnd);
+  const prv=combinedMetrics(pStart,pEnd);
 
   // Top performers — combine ad-level rows from both channels
   const adRows=[...aggregateLevel('meta','ad',curStart,curEnd),...aggregateLevel('google','ad',curStart,curEnd)];
@@ -789,9 +822,9 @@ function renderInsights(){
   const bestCtrRow=adRows.filter(r=>r.ctr!=null&&r.impressions>200).reduce((a,b)=>a&&a.ctr>b.ctr?a:b,null);
   const worstRow=adRows.filter(r=>r.leads===0&&r.spendT>0).sort((a,b)=>b.spendT-a.spendT)[0]||null;
 
-  // Channel comparison
-  const cMeta=metrics(sumAds('meta',curStart,curEnd),meta,true);
-  const cGoogle=metrics(sumAds('google',curStart,curEnd),google,false);
+  // Channel comparison (Meta c/ imposto · Google sem imposto)
+  const cMeta=metrics(sumAds('meta',curStart,curEnd),meta,true,TAX);
+  const cGoogle=metrics(sumAds('google',curStart,curEnd),google,false,1);
 
   // Recommendations
   const recs=[];
@@ -805,7 +838,7 @@ function renderInsights(){
     recs.push({t:'good',i:'⚖️',txt:`${cheaper} tem o CPL mais barato (${money(cheapV)} vs ${money(dearV)}). Considere realocar orçamento para o canal mais eficiente.`});
   }
   if(cur.ctr!=null&&cur.ctr<1) recs.push({t:'warn',i:'📉',txt:`CTR geral de ${pct(cur.ctr)} está abaixo de 1%. Teste novos criativos e chamadas para aumentar o clique.`});
-  if(aCur.clicks>0&&aCur.lpv>0){const ret=aCur.lpv/aCur.clicks*100;if(ret<60) recs.push({t:'warn',i:'🌐',txt:`Apenas ${dec(ret,0)}% dos cliques do Meta chegam à página. Verifique velocidade e experiência da landing page.`});}
+  if(mA.clicks>0&&mA.lpv>0){const ret=mA.lpv/mA.clicks*100;if(ret<60) recs.push({t:'warn',i:'🌐',txt:`Apenas ${dec(ret,0)}% dos cliques do Meta chegam à página. Verifique velocidade e experiência da landing page.`});}
   if(worstRow) recs.push({t:'bad',i:'💸',txt:`"${esc(worstRow.name.slice(0,50))}" gastou ${money(worstRow.spendT)} sem nenhum lead atribuído no período. Avalie pausar ou reformular.`});
   if(attrPct!=null&&attrPct<50) recs.push({t:'warn',i:'🔗',txt:`Apenas ${dec(attrPct,0)}% dos leads têm UTM de tráfego pago. Confira se as UTMs estão em todos os links dos anúncios.`});
   if(bestCplRow) recs.push({t:'good',i:'🏆',txt:`Menor CPL: "${esc(bestCplRow.name.slice(0,50))}" com ${money(bestCplRow.cpl)} por lead. Priorize esse anúncio ao distribuir orçamento.`});
@@ -823,7 +856,7 @@ function renderInsights(){
   <div class="tablecard">
     <table class="cmp-table"><thead><tr><th>Métrica</th><th>Meta Ads</th><th>Google Ads</th></tr></thead>
     <tbody>
-      <tr><td>Investimento (c/ imp)</td><td>${money(cMeta.spendT)}</td><td>${money(cGoogle.spendT)}</td></tr>
+      <tr><td>Investimento</td><td>${money(cMeta.spendT)} <span style="color:var(--muted);font-size:10.5px">c/ imp.</span></td><td>${money(cGoogle.spendT)} <span style="color:var(--muted);font-size:10.5px">s/ imp.</span></td></tr>
       <tr><td>Leads</td><td>${int(cMeta.leads)}</td><td>${int(cGoogle.leads)}</td></tr>
       <tr><td>CPL</td><td>${money(cMeta.cpl)}</td><td>${money(cGoogle.cpl)}</td></tr>
       <tr><td>Impressões</td><td>${int(cMeta.impressions)}</td><td>${int(cGoogle.impressions)}</td></tr>
@@ -867,7 +900,7 @@ function renderInsights(){
   <div class="tablecard">
     <table class="cmp-table"><thead><tr><th>Métrica</th><th>Atual</th><th>Anterior</th><th>Variação</th></tr></thead>
     <tbody>
-      <tr><td>Investimento (c/ imp)</td><td>${money(cur.spendT)}</td><td>${money(prv.spendT)}</td><td>${deltaHTML(cur.spendT,prv.spendT,'flat')}</td></tr>
+      <tr><td>Investimento <span style="color:var(--muted);font-size:10.5px">(Meta c/ imp. + Google s/ imp.)</span></td><td>${money(cur.spendT)}</td><td>${money(prv.spendT)}</td><td>${deltaHTML(cur.spendT,prv.spendT,'flat')}</td></tr>
       <tr><td>Leads</td><td>${int(cur.leads)}</td><td>${int(prv.leads)}</td><td>${deltaHTML(cur.leads,prv.leads,'up')}</td></tr>
       <tr><td>CPL</td><td>${money(cur.cpl)}</td><td>${money(prv.cpl)}</td><td>${deltaHTML(cur.cpl,prv.cpl,'down')}</td></tr>
       <tr><td>CTR</td><td>${pct(cur.ctr)}</td><td>${pct(prv.ctr)}</td><td>${deltaHTML(cur.ctr,prv.ctr,'up')}</td></tr>
@@ -887,10 +920,10 @@ function renderInsights(){
   CONTENT.innerHTML=html;
 
   const steps=[
-    ['Impressões → Cliques','CTR',aCur.impressions?aCur.clicks/aCur.impressions*100:null],
-    ['Cliques → Page Views','LP Retenção (só Meta)',aCur.clicks?aCur.lpv/aCur.clicks*100:null],
-    ['Page Views → Leads','Lead Rate (só Meta)',aCur.lpv?meta/aCur.lpv*100:null],
-    ['Cliques → Leads','Conv. Global',aCur.clicks?paid/aCur.clicks*100:null],
+    ['Impressões → Cliques','CTR (Meta + Google)',aCur.impressions?aCur.clicks/aCur.impressions*100:null],
+    ['Cliques → Page Views','LP Retenção (só Meta)',mA.clicks?mA.lpv/mA.clicks*100:null],
+    ['Page Views → Leads','Lead Rate (só Meta)',mA.lpv?meta/mA.lpv*100:null],
+    ['Cliques → Leads','Conv. Global (Meta + Google)',aCur.clicks?paid/aCur.clicks*100:null],
   ];
   let fs='';
   steps.forEach(s=>{
@@ -903,12 +936,127 @@ function renderInsights(){
 }
 
 // =============================================================================
+// TAB — META ADS + GOOGLE ADS (resultados combinados do pago)
+// =============================================================================
+function renderCombined(){
+  const c=combinedMetrics(curStart,curEnd);
+  const cMeta=metrics(sumAds('meta',curStart,curEnd),sumLeads(curStart,curEnd,'meta'),true,TAX);
+  const cGoogle=metrics(sumAds('google',curStart,curEnd),sumLeads(curStart,curEnd,'google'),false,1);
+  const impNote='<span style="color:var(--muted);font-size:10.5px">';
+
+  let html=`
+  <div class="section-title">Funil combinado — Meta Ads + Google Ads</div>
+  <div class="funnel" id="funnelBox"></div>
+  <div class="drillhint">ℹ️ Investimento = Meta <b>com</b> imposto ×${dec(TAX,4)} + Google <b>sem</b> imposto. Page Views existem só na Meta (ver aba Meta Ads); a conversão combinada é Leads ÷ Cliques.</div>
+
+  <div class="section-title">Resultados por canal</div>
+  <div class="tablecard">
+    <table class="cmp-table"><thead><tr><th>Métrica</th><th>Meta Ads</th><th>Google Ads</th><th>Total</th></tr></thead>
+    <tbody>
+      <tr><td>Investimento</td><td>${money(cMeta.spendT)} ${impNote}c/ imp.</span></td><td>${money(cGoogle.spendT)} ${impNote}s/ imp.</span></td><td>${money(c.spendT)}</td></tr>
+      <tr><td>Leads</td><td>${int(cMeta.leads)}</td><td>${int(cGoogle.leads)}</td><td>${int(c.leads)}</td></tr>
+      <tr><td>CPL</td><td>${money(cMeta.cpl)}</td><td>${money(cGoogle.cpl)}</td><td>${money(c.cpl)}</td></tr>
+      <tr><td>Impressões</td><td>${int(cMeta.impressions)}</td><td>${int(cGoogle.impressions)}</td><td>${int(c.impressions)}</td></tr>
+      <tr><td>Cliques</td><td>${int(cMeta.clicks)}</td><td>${int(cGoogle.clicks)}</td><td>${int(c.clicks)}</td></tr>
+      <tr><td>CTR</td><td>${pct(cMeta.ctr)}</td><td>${pct(cGoogle.ctr)}</td><td>${pct(c.ctr)}</td></tr>
+      <tr><td>CPC</td><td>${money(cMeta.cpc)}</td><td>${money(cGoogle.cpc)}</td><td>${money(c.cpc)}</td></tr>
+      <tr><td>CPM</td><td>${money(cMeta.cpm)}</td><td>${money(cGoogle.cpm)}</td><td>${money(c.cpm)}</td></tr>
+      <tr><td>Conv. (leads/cliques)</td><td>${pct(cMeta.clkToLead)}</td><td>${pct(cGoogle.clkToLead)}</td><td>${pct(c.conv)}</td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="section-title">Evolução diária</div>
+  <div class="charts">
+    <div class="chartcard"><h3>Investimento (Meta c/ imp + Google) × Leads</h3><div class="cv"><canvas id="chCombSpend"></canvas></div></div>
+    <div class="chartcard"><h3>Leads por dia (Meta · Google)</h3><div class="cv"><canvas id="chCombLeads"></canvas></div></div>
+    <div class="chartcard"><h3>CPL combinado por dia</h3><div class="cv"><canvas id="chCombCpl"></canvas></div></div>
+    <div class="chartcard"><h3>Investimento por canal por dia</h3><div class="cv"><canvas id="chCombInvest"></canvas></div></div>
+  </div>
+
+  <div class="section-title">Detalhamento por dia</div>
+  <div class="tablecard" id="combTable"></div>`;
+
+  destroyAllCharts();
+  CONTENT.innerHTML=html;
+
+  // Funnel combinado (sem Page Views — exclusivo da Meta)
+  const volRows=[
+    {name:'Investimento',val:money(c.spendT),raw:null,passo:null},
+    {name:'Impressões',val:int(c.impressions),raw:c.impressions,passo:null},
+    {name:'Cliques',val:int(c.clicks),raw:c.clicks,passo:c.ctr},
+    {name:'Leads',val:int(c.leads),raw:c.leads,passo:c.clkToLead},
+    {name:'CPL',val:money(c.cpl),raw:null,passo:null},
+    {name:'Taxa de conversão',val:pct(c.conv),raw:null,passo:null},
+  ];
+  const metRows=[
+    {name:'CPM',val:money(c.cpm)},
+    {name:'CPC',val:money(c.cpc)},
+    {name:'CTR',val:pct(c.ctr)},
+  ];
+  const maxV=Math.max(...volRows.filter(r=>r.raw!=null).map(r=>r.raw||0))||1;
+  const volHtml=volRows.map(r=>{
+    const w=r.raw==null?100:Math.max(4,(r.raw/maxV)*100);
+    const passo=r.passo!=null?`<span class="st-passo">passo ${pct(r.passo,1)}</span>`:'';
+    return `<div class="stage"><div class="name">${r.name}${passo}</div><div class="bar" style="width:${w}%">${r.val}</div></div>`;
+  }).join('');
+  const metHtml=metRows.map(r=>`<div class="stage metric-row"><div class="name">${r.name}</div><div class="bar metric">${r.val}</div></div>`).join('');
+  document.getElementById('funnelBox').innerHTML=
+    `<div class="fcol"><div class="fcol-h">Funil · volume</div>${volHtml}</div>`+
+    `<div class="fcol"><div class="fcol-h">Custo / Taxa</div>${metHtml}</div>`;
+
+  // Daily series
+  const days=[];for(let d=curStart;d<=curEnd;d=addDays(d,1))days.push(d);
+  const dm={};days.forEach(d=>dm[d]={spMeta:0,spGoogle:0,impr:0,clicks:0,leadsM:0,leadsG:0});
+  for(const r of ADS){if(!dm[r.date])continue; if(r.channel==='meta')dm[r.date].spMeta+=r.spend*TAX; else dm[r.date].spGoogle+=r.spend; dm[r.date].impr+=r.impressions; dm[r.date].clicks+=r.clicks;}
+  for(const r of LEADS){if(!dm[r.date])continue; if(r.source==='meta')dm[r.date].leadsM+=r.count; else if(r.source==='google')dm[r.date].leadsG+=r.count;}
+  const lbs=days.map(fmtBR);
+  const A=cssVar('--accent'),G=cssVar('--good'),M=cssVar('--meta'),GG=cssVar('--google');
+  const stk={x:{grid:{display:false},ticks:{font:{size:10}},stacked:true},y:{beginAtZero:true,stacked:true,ticks:{font:{size:10}}}};
+
+  mkChart('chCombSpend',{type:'bar',data:{labels:lbs,datasets:[
+    {label:'Invest. Meta',data:days.map(d=>+dm[d].spMeta.toFixed(2)),backgroundColor:M+'cc',borderRadius:4,stack:'s',yAxisID:'y'},
+    {label:'Invest. Google',data:days.map(d=>+dm[d].spGoogle.toFixed(2)),backgroundColor:GG+'cc',borderRadius:4,stack:'s',yAxisID:'y'},
+    {label:'Leads',type:'line',data:days.map(d=>dm[d].leadsM+dm[d].leadsG),borderColor:G,backgroundColor:G,tension:.3,pointRadius:3,yAxisID:'y1'}
+  ]},options:baseOpts({scales:{
+    x:{grid:{display:false},ticks:{font:{size:10}},stacked:true},
+    y:{beginAtZero:true,position:'left',stacked:true,ticks:{font:{size:10}}},
+    y1:{beginAtZero:true,position:'right',grid:{display:false},ticks:{font:{size:10}}}
+  }})});
+  mkChart('chCombLeads',{type:'bar',data:{labels:lbs,datasets:[
+    {label:'Meta',data:days.map(d=>dm[d].leadsM),backgroundColor:M+'cc',borderRadius:3,stack:'s'},
+    {label:'Google',data:days.map(d=>dm[d].leadsG),backgroundColor:GG+'cc',borderRadius:3,stack:'s'}
+  ]},options:baseOpts({scales:stk})});
+  mkChart('chCombCpl',{type:'bar',data:{labels:lbs,datasets:[
+    {label:'CPL',data:days.map(d=>{const l=dm[d].leadsM+dm[d].leadsG,sp=dm[d].spMeta+dm[d].spGoogle;return l?+(sp/l).toFixed(2):null;}),backgroundColor:A+'cc',borderRadius:5}
+  ]},options:baseOpts()});
+  mkChart('chCombInvest',{type:'bar',data:{labels:lbs,datasets:[
+    {label:'Meta',data:days.map(d=>+dm[d].spMeta.toFixed(2)),backgroundColor:M+'cc',borderRadius:3,stack:'s'},
+    {label:'Google',data:days.map(d=>+dm[d].spGoogle.toFixed(2)),backgroundColor:GG+'cc',borderRadius:3,stack:'s'}
+  ]},options:baseOpts({scales:stk})});
+
+  // Daily table (mais recente primeiro)
+  let dt='<table><thead><tr><th>Data</th><th>Invest. Total</th><th>Leads</th><th>CPL</th><th>Impressões</th><th>Cliques</th><th>CTR</th><th>Conv.</th></tr></thead><tbody>';
+  let tSp=0,tIm=0,tCl=0,tLd=0;
+  for(const d of [...days].reverse()){
+    const r=dm[d];const sp=r.spMeta+r.spGoogle,ld=r.leadsM+r.leadsG;
+    const ctr=r.impr?r.clicks/r.impr*100:null,cpl=ld?sp/ld:null,conv=r.clicks?ld/r.clicks*100:null;
+    tSp+=sp;tIm+=r.impr;tCl+=r.clicks;tLd+=ld;
+    dt+=`<tr><td>${fmtBR(d)}</td><td>${money(sp)}</td><td>${int(ld)}</td><td>${money(cpl)}</td><td>${int(r.impr)}</td><td>${int(r.clicks)}</td><td>${pct(ctr)}</td><td>${pct(conv)}</td></tr>`;
+  }
+  const tCpl=tLd?tSp/tLd:null,tCtr=tIm?tCl/tIm*100:null,tConv=tCl?tLd/tCl*100:null;
+  dt+=`<tr class="total"><td>TOTAL</td><td>${money(tSp)}</td><td>${int(tLd)}</td><td>${money(tCpl)}</td><td>${int(tIm)}</td><td>${int(tCl)}</td><td>${pct(tCtr)}</td><td>${pct(tConv)}</td></tr>`;
+  dt+='</tbody></table>';
+  const el=document.getElementById('combTable');el.innerHTML=dt;el.classList.toggle('scroll-y',days.length>7);
+}
+
+// =============================================================================
 // Main render
 // =============================================================================
 function render(){
   updatePeriodLabel();
   if(activeMainTab==='meta') renderPaid('meta');
   else if(activeMainTab==='google') renderPaid('google');
+  else if(activeMainTab==='combined') renderCombined();
   else if(activeMainTab==='allleads') renderAllLeads();
   else renderInsights();
 }
