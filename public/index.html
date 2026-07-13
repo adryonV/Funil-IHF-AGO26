@@ -88,6 +88,38 @@ button{font:inherit;cursor:pointer}
 .stage .bar.metric{background:linear-gradient(90deg,#94a3b8,#64748b)}
 .stage.metric-row .name{color:var(--muted)}
 
+/* Investimento goal card (estilo cocktail-dash) */
+.invest{padding:16px 18px}
+.invest-head{display:flex;justify-content:space-between;align-items:center;gap:10px;color:var(--muted);font-size:13px;flex-wrap:wrap}
+.goal-edit input{width:88px;border:1px solid var(--line);border-radius:6px;padding:3px 6px;font:inherit;color:var(--ink)}
+.invest-val{font-size:34px;font-weight:800;margin:6px 0 2px;letter-spacing:-.5px}
+.invest-pct{font-weight:700;font-size:14px}
+.invest .bar{height:14px;background:#e7edf3;border-radius:8px;overflow:hidden;margin:8px 0 4px}
+.invest .bar-fill{height:100%;border-radius:8px;transition:width .4s ease}
+.invest-foot{text-align:right;color:var(--muted);font-size:12px}
+
+/* Funil em linhas (estilo cocktail-dash): barra de volume + card de métrica */
+.frow{display:grid;grid-template-columns:1.25fr .9fr;border-radius:12px;overflow:hidden;box-shadow:var(--shadow);background:var(--card);border:1px solid var(--line)}
+.frow+.frow{margin-top:10px}
+.fmain{color:#fff;padding:13px 16px;display:flex;flex-direction:column;justify-content:center;
+  background:linear-gradient(135deg,var(--accent),var(--accent2))}
+.fmain.g{background:linear-gradient(135deg,#e9a417,#d68a06);color:#3a2c00}
+.flabel{font-size:12.5px;opacity:.93;font-weight:600}
+.fval{font-size:26px;font-weight:800;line-height:1.15}
+.fside{padding:10px 16px;display:flex;flex-direction:column;justify-content:center;gap:2px}
+.fside .sk{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:700}
+.fside .sv{font-size:20px;font-weight:800;color:var(--accent)}
+.fside.g .sv{color:#b9770a}
+.fextra{font-size:12px;color:var(--muted);margin-top:3px}
+
+/* Cards de taxa abaixo do funil (Connect rate / Taxa de conversão) */
+.ratecards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-top:12px}
+.ratecard{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:11px 16px}
+.ratecard .sk{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:700}
+.ratecard .sv{font-size:20px;font-weight:800;color:var(--accent);margin-top:2px}
+.ratecard.g .sv{color:#b9770a}
+.ratecard .rd{font-size:12px;color:var(--muted);margin-top:3px}
+
 /* Charts */
 .charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 @media(max-width:900px){.charts{grid-template-columns:1fr}}
@@ -445,6 +477,47 @@ function card(label,value,deltaHtml,sub,hint){
     <div class="sub">${deltaHtml||''}${sub?' &nbsp;'+sub:''}</div></div>`;
 }
 
+// ---- Cocktail-style funnel helpers -----------------------------------------
+function investCardHTML(label){
+  return `<div class="invest card">
+    <div class="invest-head"><span>${label}</span>
+      <span class="goal-edit">Meta: R$ <input type="number" id="goalInput" step="500" min="0"></span></div>
+    <div class="invest-val" id="investVal"></div>
+    <div class="invest-pct" id="investPct"></div>
+    <div class="bar"><div class="bar-fill" id="investBar"></div></div>
+    <div class="invest-foot"><span id="goalLbl"></span></div>
+  </div>`;
+}
+function wireInvest(spendT,storeKey){
+  const inp=document.getElementById('goalInput'); if(!inp) return;
+  document.getElementById('investVal').textContent=money(spendT);
+  let goal=parseFloat(localStorage.getItem(storeKey));
+  if(!isFinite(goal)||goal<=0) goal=15000;
+  inp.value=goal;
+  const upd=()=>{
+    let g=parseFloat(inp.value); if(!isFinite(g)||g<0) g=0;
+    localStorage.setItem(storeKey,String(g));
+    const pctv=g?spendT/g*100:null;
+    const over=pctv!=null&&pctv>=100;
+    const col=over?'var(--bad)':'var(--good)';
+    document.getElementById('investPct').textContent=pctv!=null?dec(pctv,1)+'%':'—';
+    document.getElementById('investPct').style.color=col;
+    const bar=document.getElementById('investBar');
+    bar.style.width=pctv!=null?Math.min(100,pctv)+'%':'0%';
+    bar.style.background=col;
+    document.getElementById('goalLbl').textContent=g?'Meta: '+money(g):'Defina uma meta';
+  };
+  inp.oninput=upd; upd();
+}
+// One funnel row (cocktail style). g=true -> âmbar (Google).
+function frow(label,val,sk,sv,extra,g){
+  return `<div class="frow"><div class="fmain${g?' g':''}"><div class="flabel">${label}</div><div class="fval">${val}</div></div>`+
+    `<div class="fside${g?' g':''}"><div class="sk">${sk}</div><div class="sv">${sv}</div>${extra?`<div class="fextra">${extra}</div>`:''}</div></div>`;
+}
+function ratecard(label,val,delta,g){
+  return `<div class="ratecard${g?' g':''}"><div class="sk">${label}</div><div class="sv">${val}</div>${delta?`<div class="rd">${delta}</div>`:''}</div>`;
+}
+
 // =============================================================================
 // PAID TAB (Meta Ads or Google Ads) — generic
 // =============================================================================
@@ -459,8 +532,11 @@ function renderPaid(channel){
   const investLabel=tax>1?'Investimento (c/ imposto)':'Investimento';
 
   let html=`
+  ${investCardHTML(tax>1?'Investimento com imposto':'Investimento')}
+
   <div class="section-title">Funil do período — ${esc(cfg.label)} · Δ vs período anterior</div>
-  <div class="funnel" id="funnelBox"></div>
+  <div id="funnelBox"></div>
+  <div class="ratecards" id="rateBox"></div>
 
   <div class="section-title">Evolução diária</div>
   <div class="charts">
@@ -484,38 +560,24 @@ function renderPaid(channel){
   destroyAllCharts();
   CONTENT.innerHTML=html;
 
-  // Funnel — volume (left) + derived cost/rate (right)
-  const volRows=[
-    {name:'Investimento',val:money(cur.spendT),raw:null,passo:null,g:channel==='google'},
-    {name:'Impressões',val:int(cur.impressions),raw:cur.impressions,passo:null,g:channel==='google'},
-    {name:'Cliques',val:int(cur.clicks),raw:cur.clicks,passo:cur.ctr,g:channel==='google'},
-  ];
-  if(hasLpv) volRows.push({name:'Page Views',val:int(cur.lpv),raw:cur.lpv,passo:cur.clkToPv,g:false});
-  volRows.push({name:'Leads',val:int(cur.leads),raw:cur.leads,passo:hasLpv?cur.pvToLead:cur.clkToLead,g:channel==='google'});
-  volRows.push({name:'CPL',val:money(cur.cpl),raw:null,passo:null,g:channel==='google'});
-  // Taxa de conversão fica na coluna da ESQUERDA (Meta: Page Views→Leads · Google: Cliques→Leads)
-  volRows.push({name:'Taxa de conversão',val:pct(cur.conv),raw:null,passo:null,g:channel==='google'});
+  // Card de investimento com meta/progresso (persistida em localStorage)
+  wireInvest(cur.spendT,'ihf_goal_'+channel);
 
-  const metRows=[
-    {name:'CPM',val:money(cur.cpm)},
-    {name:'CPC',val:money(cur.cpc)},
-    {name:'CTR',val:pct(cur.ctr)},
-  ];
-  // Só a Meta mantém Custo/PV e "Connect rate" (Cliques→Page Views) na coluna da direita.
-  if(hasLpv){ metRows.push({name:'Custo/PV',val:money(cur.cpLpv)}); metRows.push({name:'Connect rate',val:pct(cur.clkToPv)}); }
+  // Funil em linhas (cocktail): barra de volume + card de custo. CTR embutido em Impressões.
+  const g=channel==='google';
+  const ctrExtra=`CTR: <b>${pct(cur.ctr,1)}</b> ${deltaHTML(cur.ctr,prv.ctr,'up')}`;
+  let rowsHtml=
+    frow('Impressões',int(cur.impressions),'CPM',money(cur.cpm),ctrExtra,g)+
+    frow('Cliques',int(cur.clicks),'CPC',money(cur.cpc),'',g);
+  if(hasLpv) rowsHtml+=frow('Page Views',int(cur.lpv),'Custo/PV',money(cur.cpLpv),'',g);
+  rowsHtml+=frow('Leads',int(cur.leads),'CPL',money(cur.cpl),'',g);
+  document.getElementById('funnelBox').innerHTML=rowsHtml;
 
-  const maxV=Math.max(...volRows.filter(r=>r.raw!=null).map(r=>r.raw||0))||1;
-  const volHtml=volRows.map(r=>{
-    const w=r.raw==null?100:Math.max(4,(r.raw/maxV)*100);
-    const passo=r.passo!=null?`<span class="st-passo">passo ${pct(r.passo,1)}</span>`:'';
-    return `<div class="stage"><div class="name">${r.name}${passo}</div><div class="bar${r.g?' gbar':''}" style="width:${w}%">${r.val}</div></div>`;
-  }).join('');
-  const metHtml=metRows.map(r=>
-    `<div class="stage metric-row"><div class="name">${r.name}</div><div class="bar metric">${r.val}</div></div>`
-  ).join('');
-  document.getElementById('funnelBox').innerHTML=
-    `<div class="fcol"><div class="fcol-h">Funil · volume</div>${volHtml}</div>`+
-    `<div class="fcol"><div class="fcol-h">Custo / Taxa</div>${metHtml}</div>`;
+  // Connect rate + Taxa de conversão — juntas, abaixo do funil (mesmo modelo das demais métricas)
+  let rateHtml='';
+  if(hasLpv) rateHtml+=ratecard('Connect rate',pct(cur.clkToPv),'Cliques → Page Views &nbsp;'+deltaHTML(cur.clkToPv,prv.clkToPv,'up'),g);
+  rateHtml+=ratecard('Taxa de conversão',pct(cur.conv),(hasLpv?'Page Views → Leads':'Cliques → Leads')+' &nbsp;'+deltaHTML(cur.conv,prv.conv,'up'),g);
+  document.getElementById('rateBox').innerHTML=rateHtml;
 
   // Daily series
   const days=[];for(let d=curStart;d<=curEnd;d=addDays(d,1))days.push(d);
@@ -940,13 +1002,19 @@ function renderInsights(){
 // =============================================================================
 function renderCombined(){
   const c=combinedMetrics(curStart,curEnd);
+  const len=diffDays(curStart,curEnd)+1;
+  const pEnd=addDays(curStart,-1),pStart=addDays(pEnd,-(len-1));
+  const p=combinedMetrics(pStart,pEnd);
   const cMeta=metrics(sumAds('meta',curStart,curEnd),sumLeads(curStart,curEnd,'meta'),true,TAX);
   const cGoogle=metrics(sumAds('google',curStart,curEnd),sumLeads(curStart,curEnd,'google'),false,1);
   const impNote='<span style="color:var(--muted);font-size:10.5px">';
 
   let html=`
+  ${investCardHTML('Investimento (Meta c/ imposto + Google sem imposto)')}
+
   <div class="section-title">Funil combinado — Meta Ads + Google Ads</div>
-  <div class="funnel" id="funnelBox"></div>
+  <div id="funnelBox"></div>
+  <div class="ratecards" id="rateBox"></div>
   <div class="drillhint">ℹ️ Investimento = Meta <b>com</b> imposto ×${dec(TAX,4)} + Google <b>sem</b> imposto. Page Views existem só na Meta (ver aba Meta Ads); a conversão combinada é Leads ÷ Cliques.</div>
 
   <div class="section-title">Resultados por canal</div>
@@ -979,30 +1047,15 @@ function renderCombined(){
   destroyAllCharts();
   CONTENT.innerHTML=html;
 
-  // Funnel combinado (sem Page Views — exclusivo da Meta)
-  const volRows=[
-    {name:'Investimento',val:money(c.spendT),raw:null,passo:null},
-    {name:'Impressões',val:int(c.impressions),raw:c.impressions,passo:null},
-    {name:'Cliques',val:int(c.clicks),raw:c.clicks,passo:c.ctr},
-    {name:'Leads',val:int(c.leads),raw:c.leads,passo:c.clkToLead},
-    {name:'CPL',val:money(c.cpl),raw:null,passo:null},
-    {name:'Taxa de conversão',val:pct(c.conv),raw:null,passo:null},
-  ];
-  const metRows=[
-    {name:'CPM',val:money(c.cpm)},
-    {name:'CPC',val:money(c.cpc)},
-    {name:'CTR',val:pct(c.ctr)},
-  ];
-  const maxV=Math.max(...volRows.filter(r=>r.raw!=null).map(r=>r.raw||0))||1;
-  const volHtml=volRows.map(r=>{
-    const w=r.raw==null?100:Math.max(4,(r.raw/maxV)*100);
-    const passo=r.passo!=null?`<span class="st-passo">passo ${pct(r.passo,1)}</span>`:'';
-    return `<div class="stage"><div class="name">${r.name}${passo}</div><div class="bar" style="width:${w}%">${r.val}</div></div>`;
-  }).join('');
-  const metHtml=metRows.map(r=>`<div class="stage metric-row"><div class="name">${r.name}</div><div class="bar metric">${r.val}</div></div>`).join('');
+  // Card de investimento + funil em linhas (cocktail). Sem Page Views (exclusivo da Meta).
+  wireInvest(c.spendT,'ihf_goal_combined');
+  const ctrExtra=`CTR: <b>${pct(c.ctr,1)}</b> ${deltaHTML(c.ctr,p.ctr,'up')}`;
   document.getElementById('funnelBox').innerHTML=
-    `<div class="fcol"><div class="fcol-h">Funil · volume</div>${volHtml}</div>`+
-    `<div class="fcol"><div class="fcol-h">Custo / Taxa</div>${metHtml}</div>`;
+    frow('Impressões',int(c.impressions),'CPM',money(c.cpm),ctrExtra,false)+
+    frow('Cliques',int(c.clicks),'CPC',money(c.cpc),'',false)+
+    frow('Leads',int(c.leads),'CPL',money(c.cpl),'',false);
+  document.getElementById('rateBox').innerHTML=
+    ratecard('Taxa de conversão',pct(c.conv),'Cliques → Leads &nbsp;'+deltaHTML(c.conv,p.conv,'up'),false);
 
   // Daily series
   const days=[];for(let d=curStart;d<=curEnd;d=addDays(d,1))days.push(d);
