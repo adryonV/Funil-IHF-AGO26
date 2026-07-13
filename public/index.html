@@ -12,7 +12,7 @@
 :root{
   --bg:#eef1f8;--card:#fff;--ink:#0f172a;--muted:#64748b;--line:#e6e9f2;
   --accent:#4f46e5;--accent2:#7c3aed;--good:#16a34a;--bad:#dc2626;--warn:#d97706;
-  --meta:#4f46e5;--google:#0ea5e9;--org:#16a34a;
+  --meta:#4f46e5;--google:#f9ab00;--org:#16a34a;
   --shadow:0 1px 2px rgba(16,24,40,.04),0 6px 18px rgba(16,24,40,.06);
 }
 *{box-sizing:border-box}
@@ -84,7 +84,7 @@ button{font:inherit;cursor:pointer}
 .stage .bar{height:32px;border-radius:8px;background:linear-gradient(90deg,var(--accent),var(--accent2));
   display:flex;align-items:center;padding-left:10px;color:#fff;font-weight:700;font-size:13.5px;min-width:44px;
   transition:width .4s ease}
-.stage .bar.gbar{background:linear-gradient(90deg,#0ea5e9,#2563eb)}
+.stage .bar.gbar{background:linear-gradient(90deg,#fbbc04,#f9ab00);color:#3f3000}
 .stage .bar.metric{background:linear-gradient(90deg,#94a3b8,#64748b)}
 .stage.metric-row .name{color:var(--muted)}
 
@@ -428,20 +428,9 @@ function renderPaid(channel){
   const cur=metrics(sumAds(channel,curStart,curEnd),sumLeads(curStart,curEnd,cfg.source),hasLpv);
   const prv=metrics(sumAds(channel,pStart,pEnd),sumLeads(pStart,pEnd,cfg.source),hasLpv);
 
-  const taxasHtml = hasLpv
-    ? card('Cliques → Page Views',pct(cur.clkToPv),deltaHTML(cur.clkToPv,prv.clkToPv,'up'),'','Page views ÷ cliques')+
-      card('Page Views → Leads',pct(cur.pvToLead),deltaHTML(cur.pvToLead,prv.pvToLead,'up'),'','Leads ÷ page views')+
-      card('Cliques → Leads',pct(cur.clkToLead),deltaHTML(cur.clkToLead,prv.clkToLead,'up'),'','Leads ÷ cliques (conversão global)')
-    : card('Impressões → Cliques (CTR)',pct(cur.ctr),deltaHTML(cur.ctr,prv.ctr,'up'),'','Cliques ÷ impressões')+
-      card('Cliques → Leads',pct(cur.clkToLead),deltaHTML(cur.clkToLead,prv.clkToLead,'up'),'','Leads ÷ cliques (conversão global)')+
-      card('Custo por Lead',money(cur.cpl),deltaHTML(cur.cpl,prv.cpl,'down'),'','Investimento c/ imposto ÷ leads');
-
   let html=`
   <div class="section-title">Funil do período — ${esc(cfg.label)} · Δ vs período anterior</div>
   <div class="funnel" id="funnelBox"></div>
-
-  <div class="section-title">Taxas de Passagem</div>
-  <div class="grid g3" id="taxasBox">${taxasHtml}</div>
 
   <div class="section-title">Evolução diária</div>
   <div class="charts">
@@ -474,15 +463,16 @@ function renderPaid(channel){
   if(hasLpv) volRows.push({name:'Page Views',val:int(cur.lpv),raw:cur.lpv,passo:cur.clkToPv,g:false});
   volRows.push({name:'Leads',val:int(cur.leads),raw:cur.leads,passo:hasLpv?cur.pvToLead:cur.clkToLead,g:channel==='google'});
   volRows.push({name:'CPL',val:money(cur.cpl),raw:null,passo:null,g:channel==='google'});
+  // Taxa de conversão fica na coluna da ESQUERDA (Meta: Page Views→Leads · Google: Cliques→Leads)
+  volRows.push({name:hasLpv?'Taxa de conversão':'Conv.',val:pct(cur.conv),raw:null,passo:null,g:channel==='google'});
 
   const metRows=[
     {name:'CPM',val:money(cur.cpm)},
     {name:'CPC',val:money(cur.cpc)},
     {name:'CTR',val:pct(cur.ctr)},
   ];
-  if(hasLpv) metRows.push({name:'Custo/PV',val:money(cur.cpLpv)});
-  metRows.push({name:'CPL',val:money(cur.cpl)});
-  metRows.push({name:'Conv.',val:pct(cur.conv)});
+  // Só a Meta mantém Custo/PV e "Connect rate" (Cliques→Page Views) na coluna da direita.
+  if(hasLpv){ metRows.push({name:'Custo/PV',val:money(cur.cpLpv)}); metRows.push({name:'Connect rate',val:pct(cur.clkToPv)}); }
 
   const maxV=Math.max(...volRows.filter(r=>r.raw!=null).map(r=>r.raw||0))||1;
   const volHtml=volRows.map(r=>{
