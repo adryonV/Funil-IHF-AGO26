@@ -1,0 +1,5 @@
+node_modules/
+*.log
+.DS_Store
+# data.json is generated fresh by the CI build; don't commit the local sample.
+public/data.json
