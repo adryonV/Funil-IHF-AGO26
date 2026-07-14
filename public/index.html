@@ -91,12 +91,11 @@ button{font:inherit;cursor:pointer}
 /* Investimento goal card (estilo cocktail-dash) */
 .invest{padding:16px 18px}
 .invest-head{display:flex;justify-content:space-between;align-items:center;gap:10px;color:var(--muted);font-size:13px;flex-wrap:wrap}
-.goal-edit input{width:88px;border:1px solid var(--line);border-radius:6px;padding:3px 6px;font:inherit;color:var(--ink)}
+.goal-lbl{font-weight:600}
 .invest-val{font-size:34px;font-weight:800;margin:6px 0 2px;letter-spacing:-.5px}
 .invest-pct{font-weight:700;font-size:14px}
 .invest .bar{height:14px;background:#e7edf3;border-radius:8px;overflow:hidden;margin:8px 0 4px}
 .invest .bar-fill{height:100%;border-radius:8px;transition:width .4s ease}
-.invest-foot{text-align:right;color:var(--muted);font-size:12px}
 
 /* Funil em linhas (estilo cocktail-dash): barra de volume + card de métrica */
 .frow{display:grid;grid-template-columns:1.25fr .9fr;border-radius:12px;overflow:hidden;box-shadow:var(--shadow);background:var(--card);border:1px solid var(--line)}
@@ -478,36 +477,26 @@ function card(label,value,deltaHtml,sub,hint){
 }
 
 // ---- Cocktail-style funnel helpers -----------------------------------------
-function investCardHTML(label){
+// Metas fixas de investimento por aba (não editáveis).
+const INVEST_GOALS={meta:144000,google:96000,combined:144000+96000};
+function investCardHTML(label,goal){
   return `<div class="invest card">
-    <div class="invest-head"><span>${label}</span>
-      <span class="goal-edit">Meta: R$ <input type="number" id="goalInput" step="500" min="0"></span></div>
+    <div class="invest-head"><span>${label}</span><span class="goal-lbl">Meta: ${money(goal)}</span></div>
     <div class="invest-val" id="investVal"></div>
     <div class="invest-pct" id="investPct"></div>
     <div class="bar"><div class="bar-fill" id="investBar"></div></div>
-    <div class="invest-foot"><span id="goalLbl"></span></div>
   </div>`;
 }
-function wireInvest(spendT,storeKey){
-  const inp=document.getElementById('goalInput'); if(!inp) return;
+function wireInvest(spendT,goal){
   document.getElementById('investVal').textContent=money(spendT);
-  let goal=parseFloat(localStorage.getItem(storeKey));
-  if(!isFinite(goal)||goal<=0) goal=15000;
-  inp.value=goal;
-  const upd=()=>{
-    let g=parseFloat(inp.value); if(!isFinite(g)||g<0) g=0;
-    localStorage.setItem(storeKey,String(g));
-    const pctv=g?spendT/g*100:null;
-    const over=pctv!=null&&pctv>=100;
-    const col=over?'var(--bad)':'var(--good)';
-    document.getElementById('investPct').textContent=pctv!=null?dec(pctv,1)+'%':'—';
-    document.getElementById('investPct').style.color=col;
-    const bar=document.getElementById('investBar');
-    bar.style.width=pctv!=null?Math.min(100,pctv)+'%':'0%';
-    bar.style.background=col;
-    document.getElementById('goalLbl').textContent=g?'Meta: '+money(g):'Defina uma meta';
-  };
-  inp.oninput=upd; upd();
+  const pctv=goal?spendT/goal*100:null;
+  const over=pctv!=null&&pctv>=100;
+  const col=over?'var(--bad)':'var(--good)';
+  document.getElementById('investPct').textContent=pctv!=null?dec(pctv,1)+'%':'—';
+  document.getElementById('investPct').style.color=col;
+  const bar=document.getElementById('investBar');
+  bar.style.width=pctv!=null?Math.min(100,pctv)+'%':'0%';
+  bar.style.background=col;
 }
 // One funnel row (cocktail style). g=true -> âmbar (Google).
 function frow(label,val,sk,sv,extra,g){
@@ -532,9 +521,9 @@ function renderPaid(channel){
   const investLabel=tax>1?'Investimento (c/ imposto)':'Investimento';
 
   let html=`
-  ${investCardHTML(tax>1?'Investimento com imposto':'Investimento')}
+  ${investCardHTML(tax>1?'Investimento com imposto':'Investimento',INVEST_GOALS[channel])}
 
-  <div class="section-title">Funil do período — ${esc(cfg.label)} · Δ vs período anterior</div>
+  <div class="section-title">Funil do período — ${esc(cfg.label)}</div>
   <div id="funnelBox"></div>
   <div class="ratecards" id="rateBox"></div>
 
@@ -561,7 +550,7 @@ function renderPaid(channel){
   CONTENT.innerHTML=html;
 
   // Card de investimento com meta/progresso (persistida em localStorage)
-  wireInvest(cur.spendT,'ihf_goal_'+channel);
+  wireInvest(cur.spendT,INVEST_GOALS[channel]);
 
   // Funil em linhas (cocktail): barra de volume + card de custo. CTR embutido em Impressões.
   const g=channel==='google';
@@ -573,10 +562,9 @@ function renderPaid(channel){
   rowsHtml+=frow('Leads',int(cur.leads),'CPL',money(cur.cpl),'',g);
   document.getElementById('funnelBox').innerHTML=rowsHtml;
 
-  // Connect rate + Taxa de conversão — juntas, abaixo do funil (mesmo modelo das demais métricas)
-  let rateHtml='';
+  // Taxa de conversão + Connect rate — abaixo do funil (Taxa à esquerda, Connect rate à direita)
+  let rateHtml=ratecard('Taxa de conversão',pct(cur.conv),(hasLpv?'Page Views → Leads':'Cliques → Leads')+' &nbsp;'+deltaHTML(cur.conv,prv.conv,'up'),g);
   if(hasLpv) rateHtml+=ratecard('Connect rate',pct(cur.clkToPv),'Cliques → Page Views &nbsp;'+deltaHTML(cur.clkToPv,prv.clkToPv,'up'),g);
-  rateHtml+=ratecard('Taxa de conversão',pct(cur.conv),(hasLpv?'Page Views → Leads':'Cliques → Leads')+' &nbsp;'+deltaHTML(cur.conv,prv.conv,'up'),g);
   document.getElementById('rateBox').innerHTML=rateHtml;
 
   // Daily series
@@ -1010,7 +998,7 @@ function renderCombined(){
   const impNote='<span style="color:var(--muted);font-size:10.5px">';
 
   let html=`
-  ${investCardHTML('Investimento (Meta c/ imposto + Google sem imposto)')}
+  ${investCardHTML('Investimento (Meta c/ imposto + Google sem imposto)',INVEST_GOALS.combined)}
 
   <div class="section-title">Funil combinado — Meta Ads + Google Ads</div>
   <div id="funnelBox"></div>
@@ -1048,7 +1036,7 @@ function renderCombined(){
   CONTENT.innerHTML=html;
 
   // Card de investimento + funil em linhas (cocktail). Sem Page Views (exclusivo da Meta).
-  wireInvest(c.spendT,'ihf_goal_combined');
+  wireInvest(c.spendT,INVEST_GOALS.combined);
   const ctrExtra=`CTR: <b>${pct(c.ctr,1)}</b> ${deltaHTML(c.ctr,p.ctr,'up')}`;
   document.getElementById('funnelBox').innerHTML=
     frow('Impressões',int(c.impressions),'CPM',money(c.cpm),ctrExtra,false)+
@@ -1107,6 +1095,7 @@ function renderCombined(){
 // =============================================================================
 function render(){
   updatePeriodLabel();
+  TAXBADGE.style.display=activeMainTab==='google'?'none':'';
   if(activeMainTab==='meta') renderPaid('meta');
   else if(activeMainTab==='google') renderPaid('google');
   else if(activeMainTab==='combined') renderCombined();
