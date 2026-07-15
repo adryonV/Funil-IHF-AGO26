@@ -131,10 +131,20 @@ button{font:inherit;cursor:pointer}
 .tab{border:1px solid var(--line);background:#fff;border-radius:10px;padding:7px 14px;font-size:13px;color:var(--muted)}
 .tab.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
 
+/* Busca da tabela de otimização */
+.optsearch{margin:0 0 10px}
+.optsearch input{width:100%;max-width:360px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;
+  font:inherit;color:var(--ink);background:#fff}
+.optsearch input:focus{outline:none;border-color:#c9cffb;box-shadow:0 0 0 3px rgba(79,70,229,.08)}
+
 /* Tables */
 .tablecard{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);
   padding:6px;overflow:auto}
 .tablecard.scroll-y{max-height:380px;overflow-y:auto}
+/* Tabela de otimização: limitada a ~5 linhas, com TOTAL fixo no rodapé */
+.opt-scroll{overflow-y:auto}
+.opt-scroll tr.total td{position:sticky;bottom:0;z-index:1}
+.opt-scroll tr.total td:first-child{z-index:3}
 table{border-collapse:collapse;width:100%;font-size:12.5px}
 th,td{padding:9px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
 th:first-child,td:first-child{text-align:left;white-space:normal;min-width:220px;position:sticky;left:0;background:var(--card)}
@@ -255,6 +265,7 @@ let activeMainTab='meta';
 let activeLevel='campaign';
 let campaignFilter=null; // when set, adset/ad tables show only this campaign's rows
 let adsetFilter=null;    // when set, the ad table shows only this ad set's rows
+let optSearch='';        // free-text filter on the optimization table (name contains)
 const sortState={campaign:{key:'spendT',dir:-1},adset:{key:'spendT',dir:-1},ad:{key:'spendT',dir:-1}};
 const charts={};
 
@@ -544,7 +555,8 @@ function renderPaid(channel){
     <button class="tab" data-l="adset">Por ${esc(cfg.l2)}</button>
     <button class="tab" data-l="ad">Por Anúncio</button>
   </div>
-  <div class="tablecard"><div id="optTable"></div></div>`;
+  <div class="optsearch"><input type="search" id="optSearchInput" placeholder="🔍 Pesquisar por nome…" autocomplete="off"></div>
+  <div class="tablecard opt-scroll"><div id="optTable"></div></div>`;
 
   destroyAllCharts();
   CONTENT.innerHTML=html;
@@ -552,19 +564,20 @@ function renderPaid(channel){
   // Card de investimento com meta/progresso (persistida em localStorage)
   wireInvest(cur.spendT,INVEST_GOALS[channel]);
 
-  // Funil em linhas (cocktail): barra de volume + card de custo. CTR embutido em Impressões.
+  // Funil em linhas (cocktail): barra de volume + card de custo. CTR embutido em Cliques (junto do CPC).
   const g=channel==='google';
   const ctrExtra=`CTR: <b>${pct(cur.ctr,1)}</b> ${deltaHTML(cur.ctr,prv.ctr,'up')}`;
   let rowsHtml=
-    frow('Impressões',int(cur.impressions),'CPM',money(cur.cpm),ctrExtra,g)+
-    frow('Cliques',int(cur.clicks),'CPC',money(cur.cpc),'',g);
+    frow('Impressões',int(cur.impressions),'CPM',money(cur.cpm),'',g)+
+    frow('Cliques',int(cur.clicks),'CPC',money(cur.cpc),ctrExtra,g);
   if(hasLpv) rowsHtml+=frow('Page Views',int(cur.lpv),'Custo/PV',money(cur.cpLpv),'',g);
   rowsHtml+=frow('Leads',int(cur.leads),'CPL',money(cur.cpl),'',g);
   document.getElementById('funnelBox').innerHTML=rowsHtml;
 
-  // Taxa de conversão + Connect rate — abaixo do funil (Taxa à esquerda, Connect rate à direita)
-  let rateHtml=ratecard('Taxa de conversão',pct(cur.conv),(hasLpv?'Page Views → Leads':'Cliques → Leads')+' &nbsp;'+deltaHTML(cur.conv,prv.conv,'up'),g);
+  // Connect rate + Taxa de conversão — abaixo do funil (Connect rate à esquerda, Taxa de conversão à direita)
+  let rateHtml='';
   if(hasLpv) rateHtml+=ratecard('Connect rate',pct(cur.clkToPv),'Cliques → Page Views &nbsp;'+deltaHTML(cur.clkToPv,prv.clkToPv,'up'),g);
+  rateHtml+=ratecard('Taxa de conversão',pct(cur.conv),(hasLpv?'Page Views → Leads':'Cliques → Leads')+' &nbsp;'+deltaHTML(cur.conv,prv.conv,'up'),g);
   document.getElementById('rateBox').innerHTML=rateHtml;
 
   // Daily series
@@ -630,8 +643,11 @@ function renderPaid(channel){
   // Opt table sub-tabs
   document.querySelectorAll('#optTabs .tab').forEach(t=>{
     t.classList.toggle('active',t.dataset.l===activeLevel);
-    t.onclick=()=>{activeLevel=t.dataset.l;if(activeLevel==='campaign'){campaignFilter=null;adsetFilter=null;}if(activeLevel==='adset')adsetFilter=null;document.querySelectorAll('#optTabs .tab').forEach(x=>x.classList.toggle('active',x===t));renderOptTable(channel);};
+    t.onclick=()=>{activeLevel=t.dataset.l;if(activeLevel==='campaign'){campaignFilter=null;adsetFilter=null;}if(activeLevel==='adset')adsetFilter=null;optSearch='';const si=document.getElementById('optSearchInput');if(si)si.value='';document.querySelectorAll('#optTabs .tab').forEach(x=>x.classList.toggle('active',x===t));renderOptTable(channel);};
   });
+  // Busca por nome (campanha / conjunto / anúncio)
+  const optSearchEl=document.getElementById('optSearchInput');
+  if(optSearchEl){ optSearchEl.value=optSearch; optSearchEl.oninput=()=>{ optSearch=optSearchEl.value; renderOptTable(channel); }; }
   renderOptTable(channel);
 }
 
@@ -674,10 +690,14 @@ function renderOptTable(channel){
     allRows.push({...mt,name:'(não atribuído)',unattr:true});
   }
 
-  const withLeads=allRows.filter(r=>r.leads>0&&r.spendT>0&&!r.unattr);
+  // Filtro de busca por nome (campanha / conjunto / anúncio)
+  const q=optSearch.trim().toLowerCase();
+  const shown=q?allRows.filter(r=>String(r.name).toLowerCase().includes(q)):allRows;
+
+  const withLeads=shown.filter(r=>r.leads>0&&r.spendT>0&&!r.unattr);
   const bestCpl=withLeads.length?Math.min(...withLeads.map(r=>r.cpl)):null;
 
-  allRows.sort((a,b)=>{
+  shown.sort((a,b)=>{
     if(a.unattr!==b.unattr) return a.unattr?1:-1;
     let va=a[st.key],vb=b[st.key];
     if(st.key==='name') return st.dir*String(va).localeCompare(String(vb),'pt-BR');
@@ -685,9 +705,10 @@ function renderOptTable(channel){
     return st.dir*(va-vb);
   });
 
-  const T=allRows.filter(r=>!r.unattr).reduce((t,r)=>{
+  const T=shown.filter(r=>!r.unattr).reduce((t,r)=>{
     t.spend+=r.spend;t.impressions+=r.impressions;t.clicks+=r.clicks;t.lpv+=r.lpv;t.leads+=r.leads;return t;
   },{spend:0,impressions:0,clicks:0,lpv:0,leads:0});
+  const hasShownData=shown.some(r=>!r.unattr);
   const TM={...metrics({spend:T.spend,impressions:T.impressions,clicks:T.clicks,lpv:T.lpv},T.leads,cfg.hasLpv,taxFor(channel)),name:'TOTAL'};
 
   let h='';
@@ -705,7 +726,7 @@ function renderOptTable(channel){
   h+='<table><thead><tr>';
   OPT_COLS.forEach(c=>{const sorted=st.key===c[0]; h+=`<th data-k="${c[0]}" class="${sorted?'sorted '+(st.dir>0?'asc':''):''}">${c[1]}</th>`;});
   h+='</tr></thead><tbody>';
-  for(const r of allRows){
+  for(const r of shown){
     h+=`<tr class="${r.unattr?'unattr':''}">`;
     OPT_COLS.forEach(c=>{
       const k=c[0];let v=r[k];
@@ -721,9 +742,15 @@ function renderOptTable(channel){
     });
     h+='</tr>';
   }
-  h+='<tr class="total">';
-  OPT_COLS.forEach(c=>{const k=c[0];const cell=k==='name'?'TOTAL':(c[2]?c[2](TM[k]):TM[k]);h+=`<td>${cell}</td>`;});
-  h+='</tr></tbody></table>';
+  if(q&&shown.length===0){
+    h+=`<tr><td colspan="${OPT_COLS.length}" style="text-align:center;color:var(--muted);font-style:italic">Nenhum resultado para “${esc(optSearch)}”.</td></tr>`;
+  }
+  if(hasShownData){
+    h+='<tr class="total">';
+    OPT_COLS.forEach(c=>{const k=c[0];const cell=k==='name'?'TOTAL':(c[2]?c[2](TM[k]):TM[k]);h+=`<td>${cell}</td>`;});
+    h+='</tr>';
+  }
+  h+='</tbody></table>';
   document.getElementById('optTable').innerHTML=h;
   document.querySelectorAll('#optTable thead th').forEach(th=>{
     th.onclick=()=>{const k=th.dataset.k;if(st.key===k)st.dir*=-1;else{st.key=k;st.dir=k==='name'?1:-1;}renderOptTable(channel);};
@@ -732,6 +759,7 @@ function renderOptTable(channel){
     el.onclick=()=>{
       if(el.dataset.lvl==='campaign'){ campaignFilter=el.dataset.val; activeLevel='adset'; }
       else { adsetFilter=el.dataset.val; activeLevel='ad'; }
+      optSearch=''; const si=document.getElementById('optSearchInput'); if(si) si.value='';
       document.querySelectorAll('#optTabs .tab').forEach(x=>x.classList.toggle('active',x.dataset.l===activeLevel));
       renderOptTable(channel);
     };
@@ -743,6 +771,24 @@ function renderOptTable(channel){
       renderOptTable(channel);
     };
   });
+
+  // Limita a exibição a ~5 linhas com rolagem vertical (cabeçalho e TOTAL ficam fixos)
+  const wrap=document.querySelector('.opt-scroll');
+  if(wrap){
+    const table=wrap.querySelector('table');
+    const body=table&&table.tBodies[0];
+    const bodyRows=body?[...body.rows]:[];
+    const dataRows=bodyRows.filter(r=>!r.classList.contains('total'));
+    const totalRow=bodyRows.find(r=>r.classList.contains('total'));
+    if(dataRows.length>5){
+      const wrapTop=wrap.getBoundingClientRect().top;
+      let mh=dataRows[4].getBoundingClientRect().bottom-wrapTop; // topo do wrap até o fim da 5ª linha
+      if(totalRow) mh+=totalRow.offsetHeight;                    // espaço para o TOTAL fixo
+      wrap.style.maxHeight=Math.ceil(mh+6)+'px';
+    } else {
+      wrap.style.maxHeight='';
+    }
+  }
 }
 
 // =============================================================================
@@ -1039,8 +1085,8 @@ function renderCombined(){
   wireInvest(c.spendT,INVEST_GOALS.combined);
   const ctrExtra=`CTR: <b>${pct(c.ctr,1)}</b> ${deltaHTML(c.ctr,p.ctr,'up')}`;
   document.getElementById('funnelBox').innerHTML=
-    frow('Impressões',int(c.impressions),'CPM',money(c.cpm),ctrExtra,false)+
-    frow('Cliques',int(c.clicks),'CPC',money(c.cpc),'',false)+
+    frow('Impressões',int(c.impressions),'CPM',money(c.cpm),'',false)+
+    frow('Cliques',int(c.clicks),'CPC',money(c.cpc),ctrExtra,false)+
     frow('Leads',int(c.leads),'CPL',money(c.cpl),'',false);
   document.getElementById('rateBox').innerHTML=
     ratecard('Taxa de conversão',pct(c.conv),'Cliques → Leads &nbsp;'+deltaHTML(c.conv,p.conv,'up'),false);
@@ -1107,7 +1153,7 @@ function render(){
 document.querySelectorAll('#navTabs .nav-tab').forEach(t=>{
   t.onclick=()=>{
     activeMainTab=t.dataset.t;
-    activeLevel='campaign'; campaignFilter=null; adsetFilter=null;
+    activeLevel='campaign'; campaignFilter=null; adsetFilter=null; optSearch='';
     document.querySelectorAll('#navTabs .nav-tab').forEach(x=>x.classList.toggle('active',x===t));
     render();
   };
