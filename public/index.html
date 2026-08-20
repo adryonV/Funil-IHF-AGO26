@@ -439,7 +439,7 @@ async function load(){
 
 // ---- Period controls --------------------------------------------------------
 function initControls(){
-  const PRESETS=[['today','Hoje'],['yesterday','Ontem'],['7','7 dias'],['14','14 dias'],['30','30 dias'],['all','Tudo']];
+  const PRESETS=[['today','Hoje'],['yesterday','Ontem'],['7','7 dias'],['14','14 dias'],['30','30 dias'],['month','Este Mês'],['all','Tudo']];
   const ph=document.getElementById('presets');
   ph.innerHTML='';
   PRESETS.forEach(([k,l])=>{
@@ -458,6 +458,7 @@ function applyPreset(k){
   if(k==='all'){ curStart=MIN; curEnd=MAX; }
   else if(k==='today'){ const t=today>MAX?MAX:today; curStart=t; curEnd=t; }
   else if(k==='yesterday'){ const y=yest<MIN?MIN:(yest>MAX?MAX:yest); curStart=y; curEnd=y; }
+  else if(k==='month'){ const end=yest>MAX?MAX:yest; const ms=today.slice(0,7)+'-01'; let s=ms<MIN?MIN:ms; curStart=s; curEnd=(end<s?(MAX<s?s:MAX):end); }
   else{ const n=parseInt(k,10),end=yest>MAX?MAX:yest; let s=addDays(end,-(n-1)); if(s<MIN)s=MIN; curStart=s; curEnd=end; }
   document.getElementById('d1').value=curStart;
   document.getElementById('d2').value=curEnd;
